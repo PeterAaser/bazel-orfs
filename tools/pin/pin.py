@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import tarfile
@@ -29,14 +30,22 @@ class File(typing.NamedTuple):
     workspace_root: str
 
     def runfile_path(self):
-        return os.path.join(
-            os.environ["RUNFILES"], os.path.relpath(self.path, self.root)
-        )
+        attempt = os.path.join(os.environ["RUNFILES"],
+                               os.path.relpath(self.path, self.root))
+        if not os.path.exists(attempt):
+            base = Path(os.environ["RUNFILES"])
+            while base.name != "bazel-out":
+                base = base.parent
+            attempt = os.path.join(base.parent, self.path)
+            if not os.path.exists(attempt):
+                raise RuntimeError("Unable to find path of {}".format(
+                    self.path))
+
+        return attempt
 
     def archive_path(self):
-        return os.path.relpath(
-            os.path.relpath(self.path, self.root), self.workspace_root
-        )
+        return os.path.relpath(os.path.relpath(self.path, self.root),
+                               self.workspace_root)
 
 
 def file(s):
@@ -59,31 +68,25 @@ class ArtifactAction(argparse.Action):
         for artifact in values:
             (l, root, files) = artifact.split(",")
             artifacts.append(
-                Artifact(
-                    label=label(l), files=frozenset([file(s) for s in files.split(":")])
-                )
-            )
+                Artifact(label=label(l),
+                         files=frozenset([file(s) for s in files.split(":")])))
         setattr(namespace, self.dest, artifacts)
 
 
 def build_write(artifacts, output):
     for artifact in artifacts:
         match sorted(artifact.files):
-            case [x] if (
-                os.path.relpath(x.archive_path(), artifact.label.package)
-                == artifact.label.name
-            ):
+            case [x] if (os.path.relpath(
+                x.archive_path(),
+                artifact.label.package) == artifact.label.name):
                 print("exports_files(", file=output)
                 print("  srcs = [", file=output)
                 for file in artifact.files:
                     print(
                         "    {},".format(
                             repr(
-                                os.path.relpath(
-                                    file.archive_path(), artifact.label.package
-                                )
-                            )
-                        ),
+                                os.path.relpath(file.archive_path(),
+                                                artifact.label.package))),
                         file=output,
                     )
                 print("  ],".format(artifact.label), file=output)
@@ -91,17 +94,15 @@ def build_write(artifacts, output):
                 print(")", file=output)
             case _:
                 print("filegroup(", file=output)
-                print("  name = {},".format(repr(artifact.label.name)), file=output)
+                print("  name = {},".format(repr(artifact.label.name)),
+                      file=output)
                 print("  srcs = [", file=output)
                 for file in sorted(artifact.files):
                     print(
                         "    {},".format(
                             repr(
-                                os.path.relpath(
-                                    file.archive_path(), artifact.label.package
-                                )
-                            )
-                        ),
+                                os.path.relpath(file.archive_path(),
+                                                artifact.label.package))),
                         file=output,
                     )
                 print("  ],".format(artifact.label), file=output)
@@ -114,16 +115,14 @@ def gs(bucket, path):
 
 
 def https(bucket, path):
-    return urllib.parse.urlunparse(
-        (
-            "https",
-            "storage.googleapis.com",
-            os.path.join(bucket, path),
-            None,
-            None,
-            None,
-        )
-    )
+    return urllib.parse.urlunparse((
+        "https",
+        "storage.googleapis.com",
+        os.path.join(bucket, path),
+        None,
+        None,
+        None,
+    ))
 
 
 def reset(tarinfo):
@@ -137,7 +136,9 @@ def reset(tarinfo):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-b", "--bucket", help="Google cloud bucket used for uploads.")
+    parser.add_argument("-b",
+                        "--bucket",
+                        help="Google cloud bucket used for uploads.")
     parser.add_argument("-l", "--lock", help="Lock file.")
     parser.add_argument("-p", "--package", help="Bazel package.")
     parser.add_argument("artifact", action=ArtifactAction, nargs="+")
@@ -162,24 +163,25 @@ def main():
 
                 tar.add(build_path, arcname=pkg_build_path, filter=reset)
                 for file in sorted(
-                    frozenset.union(*[artifact.files for artifact in artifacts])
-                ):
-                    tar.add(
-                        file.runfile_path(), arcname=file.archive_path(), filter=reset
-                    )
+                        frozenset.union(
+                            *[artifact.files for artifact in artifacts])):
+                    tar.add(file.runfile_path(),
+                            arcname=file.archive_path(),
+                            filter=reset)
 
         with open(tar_path, "rb") as f:
             sha256 = hashlib.file_digest(f, "sha256")
 
         dir, _ = os.path.splitext(args.lock)
         name = os.path.join(args.package, dir, sha256.hexdigest() + ".tar")
-        subprocess.run(["gsutil", "mv", "-n", "-Z", tar_path, gs(args.bucket, name)])
+        subprocess.run(
+            ["gsutil", "mv", "-n", "-Z", tar_path,
+             gs(args.bucket, name)])
 
         with open(
-            os.path.join(
-                os.environ["BUILD_WORKSPACE_DIRECTORY"], args.package, args.lock
-            ),
-            "w",
+                os.path.join(os.environ["BUILD_WORKSPACE_DIRECTORY"],
+                             args.package, args.lock),
+                "w",
         ) as f:
             f.write(https(args.bucket, name))
             f.write("@")
