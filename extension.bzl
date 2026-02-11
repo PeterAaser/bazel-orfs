@@ -14,16 +14,9 @@ _default_tag = tag_class(
         "image": attr.string(
             mandatory = True,
         ),
-        "sha256": attr.string(
-            mandatory = False,
-        ),
         "makefile": attr.label(
             mandatory = False,
             default = Label("@docker_orfs//:makefile"),
-        ),
-        "pdk": attr.label(
-            mandatory = False,
-            default = Label("@docker_orfs//:asap7"),
         ),
         "makefile_yosys": attr.label(
             mandatory = False,
@@ -33,6 +26,13 @@ _default_tag = tag_class(
             mandatory = False,
             cfg = "exec",
             default = Label("@docker_orfs//:openroad"),
+        ),
+        "pdk": attr.label(
+            mandatory = False,
+            default = Label("@docker_orfs//:asap7"),
+        ),
+        "sha256": attr.string(
+            mandatory = False,
         ),
         "yosys": attr.label(
             mandatory = False,
@@ -58,7 +58,9 @@ def _orfs_dependencies():
     )
     """,
         sha256 = "ce84f2447fb7a8679e58bc54a20dc2b01b37b5802e12c57eece772a6f14bf3f0",
-        urls = ["https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-x86_64.tar.gz"],
+        urls = [
+            "https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-x86_64.tar.gz",
+        ],
     )
 
 def _orfs_repositories_impl(module_ctx):

@@ -3,11 +3,11 @@ load("@aspect_rules_js//js:defs.bzl", "js_binary")
 # Unused in CI
 #
 # load("@bazel-orfs//tools/pin:pin.bzl", "pin_data")
-load("@bazel-orfs//toolchains/scala:chisel.bzl", "chisel_library")
-load("@bazel-orfs//toolchains/scala:scala_bloop.bzl", "scala_bloop")
-load("@bazel_orfs_rules_python//python:defs.bzl", "py_binary")
-load("@bazel_orfs_rules_python//python:pip.bzl", "compile_pip_requirements")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@rules_python//python:defs.bzl", "py_binary")
+load("@rules_python//python:pip.bzl", "compile_pip_requirements")
+load("@rules_scala//scala:scala_toolchain.bzl", "scala_toolchain")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 # Reenable when we add test back in
 # load("//:eqy.bzl", "eqy_test")
@@ -20,13 +20,17 @@ load("//:yosys.bzl", "yosys")
 exports_files([
     "mock_area.tcl",
     "oss_cad_suite.BUILD.bazel",
+    "eqy.tpl",
+    "eqy-write-verilog.tcl",
 ])
 
 exports_files(
     glob([
         "test/**/*.sv",
         "test/**/*.sdc",
-    ]),
+    ]) + [
+        "sby.tpl",
+    ],
     visibility = [":__subpackages__"],
 )
 
@@ -65,22 +69,22 @@ filegroup(
 
 FAST_SETTINGS = {
     "FILL_CELLS": "",
-    "REMOVE_ABC_BUFFERS": "1",
-    "SKIP_REPORT_METRICS": "1",
-    "SKIP_CTS_REPAIR_TIMING": "1",
-    "SKIP_INCREMENTAL_REPAIR": "1",
-    "TAPCELL_TCL": "",
     "GND_NETS_VOLTAGES": "",
-    "PWR_NETS_VOLTAGES": "",
     "GPL_ROUTABILITY_DRIVEN": "0",
     "GPL_TIMING_DRIVEN": "0",
+    "PWR_NETS_VOLTAGES": "",
+    "REMOVE_ABC_BUFFERS": "1",
+    "SKIP_CTS_REPAIR_TIMING": "1",
+    "SKIP_INCREMENTAL_REPAIR": "1",
+    "SKIP_REPORT_METRICS": "1",
+    "TAPCELL_TCL": "",
 }
 
 SRAM_ARGUMENTS = FAST_SETTINGS | {
-    "SDC_FILE": "$(location :constraints-sram)",
     "IO_CONSTRAINTS": "$(location :io-sram)",
-    "PLACE_PINS_ARGS": "-min_distance 2 -min_distance_in_tracks",
     "PLACE_DENSITY": "0.42",
+    "PLACE_PINS_ARGS": "-min_distance 2 -min_distance_in_tracks",
+    "SDC_FILE": "$(location :constraints-sram)",
 }
 
 BLOCK_FLOORPLAN = {
@@ -92,33 +96,33 @@ BLOCK_FLOORPLAN = {
 orfs_flow(
     name = "tag_array_64x184",
     abstract_stage = "cts",
-    arguments = SRAM_ARGUMENTS | {
-        "CORE_UTILIZATION": "2",
-        "CORE_ASPECT_RATIO": "2",
+    arguments = SRAM_ARGUMENTS | BLOCK_FLOORPLAN | {
+        "CORE_ASPECT_RATIO": "10",
+        "CORE_UTILIZATION": "20",
         "SKIP_REPORT_METRICS": "1",
     },
     # FIXME reenable after https://github.com/The-OpenROAD-Project/OpenROAD/issues/7745 is fixed
     # mock_area = 0.8,
     stage_sources = {
-        "synth": [":constraints-sram"],
         "floorplan": [":io-sram"],
         "place": [":io-sram"],
+        "synth": [":constraints-sram"],
     },
     verilog_files = ["//another:tag_array_64x184.sv"],
     visibility = [":__subpackages__"],
 )
 
 LB_ARGS = SRAM_ARGUMENTS | {
-    "CORE_UTILIZATION": "15",
     "CORE_ASPECT_RATIO": "2",
+    "CORE_UTILIZATION": "30",
     "PLACE_DENSITY": "0.20",
     "PLACE_PINS_ARGS": "-min_distance 1 -min_distance_in_tracks",
 }
 
 LB_STAGE_SOURCES = {
-    "synth": [":constraints-sram"],
     "floorplan": [":io-sram"],
     "place": [":io-sram"],
+    "synth": [":constraints-sram"],
 }
 
 LB_VERILOG_FILES = ["test/mock/lb_32x128.sv"]
@@ -126,10 +130,16 @@ LB_VERILOG_FILES = ["test/mock/lb_32x128.sv"]
 # Test a full abstract, all stages, so leave abstract_stage unset to default value(final)
 orfs_flow(
     name = "lb_32x128",
-    arguments = LB_ARGS,
+    abstract_stage = "cts",
+    arguments = LB_ARGS | {
+        "CORE_ASPECT_RATIO": "0.5",
+        "CORE_UTILIZATION": "20",
+        "PDN_TCL": "$(PLATFORM_DIR)/openRoad/pdn/BLOCK_grid_strategy.tcl",
+    },
     mock_area = 0.7,
     stage_sources = LB_STAGE_SOURCES,
     verilog_files = LB_VERILOG_FILES,
+    visibility = ["//optuna:__pkg__"],
 )
 
 # buildifier: disable=duplicated-name
@@ -145,14 +155,18 @@ orfs_floorplan(
 orfs_flow(
     name = "lb_32x128_top",
     abstract_stage = "place",
-    arguments = LB_ARGS | {
-        "CORE_UTILIZATION": "1",
-        "PLACE_DENSITY": "0.10",
+    arguments = SRAM_ARGUMENTS | {
+        "CORE_AREA": "2 2 23 23",
+        "CORE_MARGIN": "2",
+        "DIE_AREA": "0 0 25 25",
+        "GDS_ALLOW_EMPTY": "lb_32x128",
+        "GND_NETS_VOLTAGES": "",
+        "MACRO_PLACE_HALO": "5 5",
+        "PDN_TCL": "$(PLATFORM_DIR)/openRoad/pdn/BLOCKS_grid_strategy.tcl",
+        "PLACE_DENSITY": "0.30",
 
         # Skip power checks to silence error and speed up build
         "PWR_NETS_VOLTAGES": "",
-        "GND_NETS_VOLTAGES": "",
-        "GDS_ALLOW_EMPTY": "lb_32x128",
     },
     macros = ["lb_32x128_generate_abstract"],
     stage_sources = LB_STAGE_SOURCES,
@@ -163,7 +177,9 @@ orfs_flow(
 orfs_flow(
     name = "lb_32x128",
     abstract_stage = "place",
-    arguments = LB_ARGS,
+    arguments = LB_ARGS | {
+        "PDN_TCL": "$(PLATFORM_DIR)/openRoad/pdn/BLOCK_grid_strategy.tcl",
+    },
     stage_sources = LB_STAGE_SOURCES,
     variant = "test",
     verilog_files = LB_VERILOG_FILES,
@@ -198,27 +214,29 @@ orfs_macro(
     module_top = "tag_array_64x184",
 )
 
-# Run one macro through all stages
 orfs_sweep(
     name = "L1MetadataArray",
+    abstract_stage = "cts",
     arguments = FAST_SETTINGS |
                 {
-                    "SYNTH_HIERARCHICAL": "1",
-                    "CORE_UTILIZATION": "3",
+                    "CORE_AREA": "2 2 18 68",
                     "CORE_MARGIN": "2",
-                    "MACRO_PLACE_HALO": "30 30",
-                    "PLACE_DENSITY": "0.05",
+                    "DIE_AREA": "0 0 20 70",
                     "GDS_ALLOW_EMPTY": "tag_array_64x184",
+                    "MACRO_PLACE_HALO": "2 2",
+                    "PDN_TCL": "$(PLATFORM_DIR)/openRoad/pdn/BLOCKS_grid_strategy.tcl",
+                    "PLACE_DENSITY": "0.30",
+                    "SYNTH_HIERARCHICAL": "1",
                 },
     sweep = {
-        "base": {
-            "macros": ["tag_array_64x184_generate_abstract"],
+        "1": {
+            "macros": ["amalgam"],
             "sources": {
                 "SDC_FILE": [":test/constraints-top.sdc"],
             },
         },
-        "1": {
-            "macros": ["amalgam"],
+        "base": {
+            "macros": ["tag_array_64x184_generate_abstract"],
             "sources": {
                 "SDC_FILE": [":test/constraints-top.sdc"],
             },
@@ -249,6 +267,8 @@ orfs_synth(
     name = "Mul_synth",
     arguments = {
         "SDC_FILE": "$(location :test/constraints-combinational.sdc)",
+        # Test locally, modify this, no re-synthesis should take place
+        "PLACE_DENSITY": "0.53",
     },
     data = [":test/constraints-combinational.sdc"],
     module_top = "Mul",
@@ -284,15 +304,15 @@ filegroup(
 orfs_flow(
     name = "regfile_128x65",
     arguments = SRAM_ARGUMENTS | BLOCK_FLOORPLAN | {
-        "DIE_AREA": "0 0 400 400",
-        "CORE_AREA": "2 2 298 298",
+        "CORE_AREA": "2 2 23 23",
+        "DIE_AREA": "0 0 25 25",
         "IO_CONSTRAINTS": "$(location :io-sram)",
-        "PLACE_DENSITY": "0.10",
+        "PLACE_DENSITY": "0.30",
     },
     stage_sources = {
-        "synth": [":constraints-sram"],
         "floorplan": [":io-sram"],
         "place": [":io-sram"],
+        "synth": [":constraints-sram"],
     },
     verilog_files = [
         "test/rtl/regfile_128x65.sv",
@@ -306,9 +326,9 @@ orfs_sweep(
     arguments = LB_ARGS,
     stage = "cts",
     stage_sources = {
-        "synth": [":constraints-sram"],
         "floorplan": [":io-sram"],
         "place": [":io-sram"],
+        "synth": [":constraints-sram"],
     },
     sweep = {
         "1": {
@@ -375,7 +395,6 @@ py_binary(
 filegroup(
     name = "gatelist",
     srcs = [
-        "lb_32x128_final",
         "regfile_128x65_final",
     ],
     output_group = "6_final.v",
@@ -384,7 +403,6 @@ filegroup(
 filegroup(
     name = "spef",
     srcs = [
-        "lb_32x128_final",
         "regfile_128x65_final",
     ],
     output_group = "6_final.spef",
@@ -427,8 +445,9 @@ orfs_ppa(
 [orfs_flow(
     name = "lb_32x128_{}".format(pdk),
     arguments = {
-        "CORE_UTILIZATION": "5",
         "CORE_ASPECT_RATIO": "2",
+        "CORE_UTILIZATION": "5",
+        "PLACE_DENSITY": "0.40",
     },
     pdk = "@docker_orfs//:" + pdk,
     sources = {
@@ -508,6 +527,20 @@ sh_binary(
     visibility = ["//visibility:public"],
 )
 
+# Custom Scala toolchain with SemanticDB enabled
+scala_toolchain(
+    name = "semanticdb_toolchain_impl",
+    enable_semanticdb = True,
+    semanticdb_bundle_in_jar = False,
+    visibility = ["//visibility:public"],
+)
+
+toolchain(
+    name = "semanticdb_toolchain",
+    toolchain = ":semanticdb_toolchain_impl",
+    toolchain_type = "@rules_scala//scala:toolchain_type",
+)
+
 # Not in use in CI
 #
 # pin_data(
@@ -527,19 +560,8 @@ sh_binary(
 #     tags = ["manual"],
 # )
 
-# This library lists all the scala files we will be editing in vscode via bloop
-chisel_library(
-    name = "blooplib",
-    srcs = [
-        "//toolchains/scala:chiselfiles",
-    ],
-    deps = [
-        "@maven//:org_scalatest_scalatest_2_13",
-    ],
-)
-
-# Set up bloop
-scala_bloop(
-    name = "bloop",
-    src = "blooplib",
+py_binary(
+    name = "bsp",
+    srcs = ["bsp.py"],
+    visibility = ["//visibility:public"],
 )

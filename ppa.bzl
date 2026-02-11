@@ -1,6 +1,7 @@
 """plot ppa for top modules"""
 
 load("@bazel-orfs//:openroad.bzl", "orfs_run")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 def orfs_ppa(name, title, plot, tags = []):
     """Generate PPA plots
@@ -37,13 +38,19 @@ def orfs_ppa(name, title, plot, tags = []):
     native.genrule(
         name = "{}_ppas".format(name),
         srcs = ["{}_stats".format(name)],
-        outs = ["{}_ppa.pdf".format(name), "{}_ppa.yaml".format(name), "{}_ppa.csv".format(name)],
-        cmd = "$(execpath @bazel-orfs//:plot_clock_period_tool) $(location :{name}_ppa.pdf) $(location :{name}_ppa.yaml) $(location :{name}_ppa.csv) \"{title}\" $(locations :{name}_stats)".format(name = name, title = title),
+        outs = [
+            "{}_ppa.pdf".format(name),
+            "{}_ppa.yaml".format(name),
+            "{}_ppa.csv".format(name),
+        ],
+        cmd = '$(execpath @bazel-orfs//:plot_clock_period_tool) $(location :{name}_ppa.pdf) $(location :{name}_ppa.yaml) $(location :{name}_ppa.csv) "{title}" $(locations :{name}_stats)'.format(
+            name = name,
+            title = title,
+        ),
         tools = ["@bazel-orfs//:plot_clock_period_tool"],
         tags = tags,
     )
-
-    native.sh_binary(
+    sh_binary(
         name = name,
         srcs = ["@bazel-orfs//:open_plots.sh"],
         args = ["$(location :{}_ppa.pdf)".format(name)],

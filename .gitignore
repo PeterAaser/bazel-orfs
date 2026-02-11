@@ -1,7 +1,4 @@
-bazel-bazel-orfs
-bazel-bin       
-bazel-out       
-bazel-testlogs  
+bazel-*
 user.bazelrc
 .metals/
 .vscode/
@@ -11,3 +8,9 @@ node_modules/
 build.profile
 .bloop/
 external
+
+.bsp/
+.bazelbsp/
+
+# Optuna results
+optuna/results/
